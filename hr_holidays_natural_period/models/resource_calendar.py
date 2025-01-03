@@ -1,7 +1,7 @@
 # Copyright 2020-2021 Tecnativa - Víctor Martínez
 # License AGPL-3.0 or later (https://www.gnu.org/licenses/agpl).
 
-from datetime import datetime, time
+from datetime import datetime
 
 from dateutil import rrule
 from pytz import timezone
@@ -20,23 +20,35 @@ class ResourceCalendar(models.Model):
                 return True
         return False
 
-    def _natural_period_intervals_batch(self, start_dt, end_dt, intervals, resources):
+    def _natural_period_intervals_batch(
+        self, start_dt, end_dt, intervals, resources, tz
+    ):
         for resource in resources or []:
             interval_resource = intervals[resource.id]
-            tz = timezone(resource.tz)
+            tz = tz or timezone((resource or self).tz)
             attendances = []
+            attendances_add = []
             if len(interval_resource._items) > 0:
                 attendances = interval_resource._items
             for day in rrule.rrule(rrule.DAILY, dtstart=start_dt, until=end_dt):
                 exist_interval = self._exist_interval_in_date(attendances, day.date())
                 if not exist_interval:
-                    attendances.append(
+                    attendances_add.append(
                         (
-                            datetime.combine(day.date(), time.min).replace(tzinfo=tz),
-                            datetime.combine(day.date(), time.max).replace(tzinfo=tz),
+                            tz.localize(
+                                datetime.combine(
+                                    day.date(), datetime.min.time()
+                                ).replace(tzinfo=None)
+                            ),
+                            tz.localize(
+                                datetime.combine(
+                                    day.date(), datetime.max.time()
+                                ).replace(tzinfo=None)
+                            ),
                             self.env["resource.calendar.attendance"],
                         )
                     )
+            attendances.extend(attendances_add)
             intervals[resource.id] = Intervals(attendances)
         return intervals
 
@@ -48,6 +60,6 @@ class ResourceCalendar(models.Model):
         )
         if self.env.context.get("natural_period"):
             return self._natural_period_intervals_batch(
-                start_dt, end_dt, res, resources
+                start_dt, end_dt, res, resources, tz
             )
         return res
